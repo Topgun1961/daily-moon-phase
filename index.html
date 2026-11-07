@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily Moon Phase</title>
+<style>
+  :root { color-scheme: dark; --bg:#10182b; --panel:#19243b; --muted:#b8c4da; --accent:#d8e4ff; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px;
+         font-family:system-ui,-apple-system,Segoe UI,sans-serif; color:#f7f9ff;
+         background:radial-gradient(circle at top,#263a60 0,#10182b 58%); }
+  main { width:min(100%,520px); background:rgba(25,36,59,.96); border:1px solid #3b4d70;
+         border-radius:24px; padding:28px; box-shadow:0 18px 55px #0006; }
+  h1 { margin:0 0 6px; font-size:1.55rem; letter-spacing:.04em; }
+  .sub,.muted { color:var(--muted); }
+  .hero { margin:22px 0; padding:28px 18px; text-align:center; border-radius:18px;
+          background:linear-gradient(145deg,#0b1222,#1c2c4b); }
+  .moon { font-size:5rem; line-height:1.2; }
+  .phase { font-size:1.55rem; font-weight:700; margin:8px 0; }
+  .illum { font-size:2.4rem; font-weight:750; }
+  .stats { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:16px; }
+  .stat { background:#111b30; border-radius:14px; padding:14px; }
+  .stat strong { display:block; font-size:1.2rem; margin-top:5px; }
+  label { display:block; margin:18px 0 8px; font-weight:600; }
+  input,button { font:inherit; border-radius:10px; padding:12px 14px; }
+  input { width:100%; color:#fff; background:#0e1729; border:1px solid #526587; }
+  button { margin-top:12px; width:100%; border:1px solid #7185aa; color:#fff; background:#263b60; cursor:pointer; }
+  button:hover { background:#324c78; }
+  footer { margin-top:20px; font-size:.8rem; line-height:1.5; color:var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>🌙 DAILY MOON PHASE</h1>
+  <div class="sub">Moon phase and illumination for any date</div>
+  <section class="hero" aria-live="polite">
+    <div class="moon" id="moon">🌑</div>
+    <div class="phase" id="phase">New Moon</div>
+    <div class="illum" id="illum">0%</div>
+    <div class="muted">Estimated illuminated portion</div>
+  </section>
+  <label for="date">Choose a date</label>
+  <input id="date" type="date">
+  <button id="today">Show today</button>
+  <div class="stats">
+    <div class="stat"><span class="muted">Lunar age</span><strong id="age">—</strong></div>
+    <div class="stat"><span class="muted">Cycle length</span><strong>29.53 days</strong></div>
+  </div>
+  <footer>
+    Moon phase is calculated from an approximate astronomical lunar-cycle model.
+    Results may differ slightly from observatory or almanac values. This app works
+    offline once saved on your computer.
+  </footer>
+</main>
+<script>
+(() => {
+  const synodicMonth = 29.530588853;
+  // Known reference new moon near 2000-01-06 18:14 UTC (JD 2451550.1).
+  const referenceNewMoonJD = 2451550.1;
+  const names = ["New Moon","Waxing Crescent","First Quarter","Waxing Gibbous",
+                 "Full Moon","Waning Gibbous","Last Quarter","Waning Crescent"];
+  const icons = ["🌑","🌒","🌓","🌔","🌕","🌖","🌗","🌘"];
+  const $ = id => document.getElementById(id);
+
+  function julianDay(dateString) {
+    const [y,m,d] = dateString.split("-").map(Number);
+    return Date.UTC(y,m-1,d,12,0,0) / 86400000 + 2440587.5;
+  }
+  function render(dateString) {
+    if (!dateString) return;
+    const age = ((julianDay(dateString) - referenceNewMoonJD) % synodicMonth + synodicMonth) % synodicMonth;
+    const phase = age / synodicMonth;
+    const illumination = (1 - Math.cos(2 * Math.PI * phase)) * 50;
+    const index = Math.floor(phase * 8 + 0.5) % 8;
+    $("moon").textContent = icons[index];
+    $("phase").textContent = names[index];
+    $("illum").textContent = illumination.toFixed(1) + "%";
+    $("age").textContent = age.toFixed(1) + " days";
+  }
+  const today = new Date();
+  const localDate = [today.getFullYear(),String(today.getMonth()+1).padStart(2,"0"),
+                     String(today.getDate()).padStart(2,"0")].join("-");
+  $("date").value = localDate;
+  $("date").addEventListener("change", e => render(e.target.value));
+  $("today").addEventListener("click", () => { $("date").value = localDate; render(localDate); });
+  render(localDate);
+})();
+</script>
+</body>
+</html>
