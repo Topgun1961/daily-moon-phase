@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Live Internet Speed Meter</title>
+<style>
+:root{color-scheme:dark;--bg:#101827;--panel:#182438;--muted:#9fb0c7;--text:#f4f7fb;--accent:#48c6ef;--line:#2a3a52}
+*{box-sizing:border-box}body{margin:0;background:transparent;color:var(--text);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+.widget{max-width:580px;margin:0 auto;padding:18px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(145deg,#1b2b43,#111c2d);box-shadow:0 12px 32px #0003}
+.top{display:flex;justify-content:space-between;align-items:center;gap:10px}h1{font-size:18px;margin:0}.status{font-size:12px;color:var(--muted)}
+.tabs{display:flex;gap:8px;margin-top:16px}.tabs button{flex:1;background:#ffffff0d;color:var(--muted);border:1px solid var(--line)}
+.tabs button.active{background:#48c6ef20;color:#8ee2ff;border-color:#48c6ef}
+.gauge{margin:20px auto 15px;width:190px;height:190px;border-radius:50%;display:grid;place-items:center;background:conic-gradient(var(--accent) 0deg,#30435d 0deg);position:relative}
+.gauge:before{content:"";position:absolute;inset:11px;border-radius:50%;background:#142238}
+.inner{position:relative;text-align:center}.speed{font-size:39px;font-weight:800;letter-spacing:-1.8px;line-height:1.1}.unit{font-size:12px;color:var(--muted);margin-top:5px}
+.metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;margin:16px 0}.metric{padding:12px 8px;text-align:center;background:#ffffff08;border:1px solid var(--line);border-radius:12px}
+.label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px}.value{font-size:20px;font-weight:700;margin-top:4px}
+.controls{display:flex;gap:9px;margin-top:16px}.controls button{flex:1;border:0;border-radius:12px;padding:13px 12px;background:var(--accent);color:#082033;font-weight:750;font-size:15px;cursor:pointer}
+.controls button.stop{background:#ffffff14;color:var(--text);border:1px solid var(--line)}button:disabled{opacity:.5;cursor:default}
+.note{font-size:11px;color:var(--muted);text-align:center;margin:13px 2px 0}
+@media(max-width:360px){.widget{padding:13px}.gauge{width:165px;height:165px}.metrics{gap:6px}.value{font-size:17px}}
+</style>
+</head>
+<body>
+<div class="widget">
+ <div class="top"><h1>Live Internet Speed</h1><div class="status" id="status">Stopped</div></div>
+ <div class="tabs">
+  <button id="downloadTab" class="active">Download</button>
+  <button id="uploadTab">Upload</button>
+ </div>
+ <div class="gauge" id="gauge"><div class="inner"><div class="speed" id="speed">0.0</div><div class="unit">Mbps · live</div></div></div>
+ <div class="metrics">
+  <div class="metric"><div class="label">Ping</div><div class="value" id="ping">—</div><div class="unit">ms</div></div>
+  <div class="metric"><div class="label">Jitter</div><div class="value" id="jitter">—</div><div class="unit">ms</div></div>
+  <div class="metric"><div class="label">Peak speed</div><div class="value" id="peak">—</div><div class="unit">Mbps</div></div>
+ </div>
+ <div class="controls"><button id="start">Start Live Test</button><button id="stop" class="stop" disabled>Stop</button></div>
+ <div class="note">Live testing transfers data while running. Download and upload modes run separately. Results depend on your Wi-Fi, device and network conditions.</div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const base='https://speed.cloudflare.com';
+let running=false, mode='download', peak=0, workers=[], pingTimer=null, samples=[], generation=0;
+const fmt=n=>Number.isFinite(n)?(n<10?n.toFixed(2):n.toFixed(1)):'—';
+function status(s){$('status').textContent=s}
+function gauge(n){
+ const deg=Math.max(0,Math.min(360,Math.log10(Math.max(0,n)+1)/Math.log10(1001)*360));
+ $('gauge').style.background=`conic-gradient(#48c6ef ${deg}deg,#30435d ${deg}deg)`;
+ $('speed').textContent=fmt(n);
+}
+function chooseMode(m){
+ if(running) stopTest();
+ mode=m;
+ $('downloadTab').classList.toggle('active',m==='download');
+ $('uploadTab').classList.toggle('active',m==='upload');
+ gauge(0);peak=0;$('peak').textContent='—';
+ status('Ready · '+(m==='download'?'Download':'Upload'));
+}
+$('downloadTab').onclick=()=>chooseMode('download');
+$('uploadTab').onclick=()=>chooseMode('upload');
+function record(bytes,ms,token){
+ if(!running||token!==generation)return;
+ const mbps=bytes*8/(ms/1000)/1e6;
+ gauge(mbps);peak=Math.max(peak,mbps);$('peak').textContent=fmt(peak);
+}
+async function downloadWorker(token){
+ while(running&&token===generation){
+  const controller=new AbortController();workers.push(controller);
+  const started=performance.now();let bytes=0;
+  try{
+   const response=await fetch(base+'/__down?bytes=5000000&seed='+Math.random(),{cache:'no-store',signal:controller.signal});
+   if(!response.ok)throw Error('Download request failed');
+   const reader=response.body.getReader();
+   while(running&&token===generation){
+    const {done,value}=await reader.read();if(done)break;
+    bytes+=value.byteLength;record(bytes,performance.now()-started,token);
+   }
+  }catch(e){if(running&&token===generation)status('Connection issue — retrying');}
+  workers=workers.filter(x=>x!==controller);
+  if(running&&token===generation&&bytes===0)await new Promise(r=>setTimeout(r,700));
+ }
+}
+async function uploadWorker(token){
+ while(running&&token===generation){
+  const size=750000;
+  const data=new Uint8Array(size);
+  for(let i=0;i<size;i+=65536)crypto.getRandomValues(data.subarray(i,Math.min(i+65536,size)));
+  const started=performance.now();
+  try{
+   const response=await fetch(base+'/__up?seed='+Math.random(),{method:'POST',body:data,cache:'no-store'});
+   if(!response.ok)throw Error('Upload request failed');
+   await response.arrayBuffer();record(size,performance.now()-started,token);
+  }catch(e){if(running&&token===generation)status('Connection issue — retrying');await new Promise(r=>setTimeout(r,700));}
+ }
+}
+async function pingLoop(token){
+ while(running&&token===generation){
+  const start=performance.now();
+  try{
+   await fetch(base+'/cdn-cgi/trace?live='+Math.random(),{cache:'no-store'});
+   const p=performance.now()-start;samples.push(p);if(samples.length>8)samples.shift();
+   $('ping').textContent=fmt(samples.reduce((a,b)=>a+b,0)/samples.length);
+   const diffs=samples.slice(1).map((v,i)=>Math.abs(v-samples[i]));
+   $('jitter').textContent=diffs.length?fmt(diffs.reduce((a,b)=>a+b,0)/diffs.length):'—';
+  }catch(e){}
+  await new Promise(r=>setTimeout(r,1800));
+ }
+}
+function stopTest(){
+ running=false;generation++;workers.forEach(w=>w.abort());workers=[];
+ if(pingTimer){clearInterval(pingTimer);pingTimer=null;}
+ $('start').disabled=false;$('stop').disabled=true;status('Stopped');
+}
+$('start').onclick=()=>{
+ if(running)return;
+ running=true;generation++;const token=generation;peak=0;samples=[];
+ $('peak').textContent='—';$('ping').textContent='—';$('jitter').textContent='—';
+ $('start').disabled=true;$('stop').disabled=false;
+ status('Live '+mode+' test');gauge(0);
+ if(mode==='download')downloadWorker(token);else uploadWorker(token);
+ pingLoop(token);
+};
+$('stop').onclick=stopTest;
+</script>
+</body>
+</html>
