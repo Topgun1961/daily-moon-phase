@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guelph Grocery Price Finder – Version 2.2</title>
+<style>
+:root{color-scheme:light;--green:#287a48;--dark:#203027;--line:#dfe5e1;--muted:#66736b;--bg:#f5f8f6}
+*{box-sizing:border-box}body{margin:0;padding:12px;font-family:Arial,Helvetica,sans-serif;color:var(--dark);background:transparent}
+.app{max-width:980px;margin:auto;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 3px 14px #14321e12}
+header{padding:17px 18px;background:var(--green);color:white}h1{font-size:21px;margin:0 0 5px}header p{margin:0;font-size:13px;opacity:.94}
+.add{display:flex;gap:8px;padding:13px;background:var(--bg);border-bottom:1px solid var(--line)}
+input,button{font:inherit}input[type=text]{width:100%;min-width:0;padding:10px;border:1px solid #cbd5ce;border-radius:8px;background:#fff}
+button{border:0;border-radius:8px;padding:9px 12px;cursor:pointer;font-weight:600}button:focus-visible,input:focus-visible{outline:3px solid #a8d9b7;outline-offset:2px}
+.primary,.go{background:var(--green);color:white}.primary:hover,.go:hover{background:#1f6339}
+.toolbar{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:12px 14px 4px;flex-wrap:wrap}
+.toolbar strong{font-size:14px}.toolbar small{color:var(--muted)}
+.clear{background:#f1f3f2;color:#47534b;font-size:12px}.list{padding:4px 14px 12px}
+.item{display:grid;grid-template-columns:minmax(140px,1fr) auto auto;align-items:center;gap:8px;padding:12px 0;border-bottom:1px solid var(--line)}
+.item-name{font-weight:700;overflow-wrap:anywhere}.go{white-space:nowrap;display:inline-block;text-decoration:none;text-align:center}.delete{background:#f1f3f2;color:#47534b;padding:9px 10px}
+.result{grid-column:1/-1;background:#f7faf8;border:1px solid var(--line);border-radius:9px;padding:10px}
+.result-title{font-size:13px;font-weight:700;margin-bottom:8px}
+.fields{display:grid;grid-template-columns:minmax(120px,1fr) 105px minmax(120px,1fr);gap:7px}.fields input{font-size:13px}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px}.save{background:#e2f1e7;color:#205d36;font-size:13px}.status{font-size:12px;color:var(--green)}
+.comparison{margin:0 14px 14px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.comparison h2{font-size:15px;margin:0;padding:11px 12px;background:var(--bg)}
+table{width:100%;border-collapse:collapse;font-size:13px}th,td{text-align:left;padding:9px 10px;border-top:1px solid var(--line)}th{color:var(--muted);font-weight:600;background:#fff}
+.best{color:#176b39;font-weight:700}.empty{padding:22px 8px;text-align:center;color:var(--muted);font-size:14px}
+.note{padding:0 14px 13px;color:var(--muted);font-size:12px;line-height:1.45}footer{padding:10px 14px;background:var(--bg);border-top:1px solid var(--line);color:var(--muted);font-size:11px}
+@media(max-width:560px){body{padding:5px}.fields{grid-template-columns:1fr 90px}.fields input:last-child{grid-column:1/-1}.item{grid-template-columns:minmax(0,1fr) auto auto}table{font-size:12px}th,td{padding:8px 6px}}
+</style>
+</head>
+<body>
+<div class="app">
+<header><h1>🛒 Guelph Grocery Price Finder</h1><p>Version 2.2 · Bing search for local flyers and grocery prices</p></header>
+<form class="add" id="addForm"><input id="newItem" type="text" maxlength="100" placeholder="Add an item (e.g. chicken breasts)" aria-label="New grocery item"><button class="primary" type="submit">Add item</button></form>
+<div class="toolbar"><strong>Your shopping list</strong><button class="clear" id="clearAll" type="button">Clear all items</button></div>
+<main class="list" id="list" aria-live="polite"></main>
+<section class="comparison"><h2>Price comparison · lowest price first</h2><div id="comparisonBody"></div></section>
+<div class="note">Go opens a targeted web search for the item, Guelph, Ontario, weekly flyers and local grocery stores. Search results are not guaranteed to include every flyer. Enter the advertised price and store below, then choose Save price. Comparison sorts saved prices numerically from lowest to highest; check package sizes before comparing.</div>
+<footer>Your list and saved prices are stored in this browser on this device only. They are not synced between devices.</footer>
+</div>
+<script>
+(()=> {
+ const KEY='guelph-grocery-price-finder-v2';
+ const stores=['Walmart','Zehrs','Food Basics','No Frills','FreshCo','Metro','Sobeys','Farm Boy','Real Canadian Superstore'];
+ const starter=[{name:'Gay Lea Unsalted Butter',store:'',price:'',size:'',saved:false},{name:'Neilson Half & Half Cream',store:'',price:'',size:'',saved:false}];
+ let items;
+ try{const parsed=JSON.parse(localStorage.getItem(KEY));items=Array.isArray(parsed)?parsed:starter.map(x=>({...x}));}
+ catch(e){items=starter.map(x=>({...x}));}
+ const list=document.getElementById('list'),comparison=document.getElementById('comparisonBody');
+ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const persist=()=>localStorage.setItem(KEY,JSON.stringify(items));
+ function priceNumber(value){const n=Number(String(value??'').replace(/[$,\s]/g,''));return Number.isFinite(n)&&n>=0&&String(value).trim()!==''?n:null;}
+ function searchUrl(name){
+   const query=`"${name}" Guelph Ontario grocery flyer weekly ad sale price ${stores.join(' ')}`;
+   return 'https://www.bing.com/search?q='+encodeURIComponent(query);
+ }
+ function render(){
+  if(!items.length)list.innerHTML='<div class="empty">Your list is empty. Add an item above to get started.</div>';
+  else list.innerHTML=items.map((it,i)=>`<section class="item">
+   <div class="item-name">${esc(it.name)}</div>
+   <a class="go" href="${searchUrl(it.name)}" target="_blank" rel="noopener noreferrer">Go ↗</a>
+   <button class="delete" type="button" data-action="delete" data-i="${i}" aria-label="Delete ${esc(it.name)}">✕</button>
+   <div class="result"><div class="result-title">Best price you found</div>
+    <div class="fields">
+     <input type="text" data-field="store" data-i="${i}" list="storeOptions" placeholder="Store" value="${esc(it.store)}" aria-label="Store">
+     <input type="text" data-field="price" data-i="${i}" placeholder="Price $" value="${esc(it.price)}" aria-label="Price in dollars" inputmode="decimal">
+     <input type="text" data-field="size" data-i="${i}" placeholder="Package size / notes" value="${esc(it.size)}" aria-label="Package size or notes">
+    </div>
+    <div class="actions"><button class="save" type="button" data-action="save" data-i="${i}">Save price</button><span class="status" id="status-${i}">${it.saved?'✓ Saved':''}</span></div>
+   </div></section>`).join('');
+  renderComparison();
+ }
+ function renderComparison(){
+  const rows=items.map((it,i)=>({it,i,n:priceNumber(it.price)})).filter(x=>x.it.saved&&x.n!==null).sort((a,b)=>a.n-b.n);
+  if(!rows.length){comparison.innerHTML='<div class="empty">Save a price for an item to see it ranked here.</div>';return;}
+  comparison.innerHTML=`<table><thead><tr><th>Item</th><th>Store</th><th>Price</th><th>Size</th></tr></thead><tbody>${rows.map((r,j)=>`<tr><td>${esc(r.it.name)}</td><td>${esc(r.it.store||'—')}</td><td class="${j===0?'best':''}">${j===0?'★ ':''}$${r.n.toFixed(2)}</td><td>${esc(r.it.size||'—')}</td></tr>`).join('')}</tbody></table>`;
+ }
+ document.getElementById('addForm').addEventListener('submit',e=>{e.preventDefault();const input=document.getElementById('newItem'),name=input.value.trim();if(!name)return;items.push({name,store:'',price:'',size:'',saved:false});input.value='';persist();render();input.focus();});
+ list.addEventListener('input',e=>{const field=e.target.dataset.field;if(!field)return;const i=Number(e.target.dataset.i);if(!items[i])return;items[i][field]=e.target.value;items[i].saved=false;persist();const s=document.getElementById('status-'+i);if(s)s.textContent='';renderComparison();});
+ list.addEventListener('click',e=>{const b=e.target.closest('button[data-action]');if(!b)return;const i=Number(b.dataset.i);if(!items[i])return;
+  if(b.dataset.action==='delete'){items.splice(i,1);persist();render();}
+  if(b.dataset.action==='save'){if(priceNumber(items[i].price)===null){alert('Please enter a valid price, such as 4.99.');return;}items[i].saved=true;persist();render();}
+ });
+ document.getElementById('clearAll').addEventListener('click',()=>{if(!items.length)return;if(confirm('Delete all items and saved prices?')){items=[];persist();render();}});
+ render();
+})();
+</script>
+<datalist id="storeOptions"><option>Walmart</option><option>Zehrs</option><option>Food Basics</option><option>No Frills</option><option>FreshCo</option><option>Metro</option><option>Sobeys</option><option>Farm Boy</option><option>Real Canadian Superstore</option></datalist>
+</body></html>
